@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>实验室样本接收台 · 演示</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark">🧪</span>
+    <div>
+      <h1>实验室样本接收台</h1>
+      <p class="subtitle">样本接收 · 批次分配 · 流转追溯 <em>（演示环境，数据均为虚构，不连接真实实验室系统）</em></p>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <label class="operator-box">当前经手人
+      <select id="operatorSelect"></select>
+    </label>
+    <button class="btn btn-ghost" id="resetDemoBtn" title="清空数据并重新载入虚构演示数据">重置演示数据</button>
+    <button class="btn btn-ghost" id="exportBtn" title="导出当前全部数据为 JSON 备份">导出备份</button>
+  </div>
+</header>
+
+<div class="demo-banner" id="demoBanner">
+  <span>⚠️ 演示模式：以下全部为虚构样本与人员，仅用于流程演示。扫码由「模拟条码芯片」完成，无任何真实采集设备或 LIS 连接。</span>
+</div>
+
+<nav class="tabs" id="tabs">
+  <button class="tab active" data-tab="reception">① 接收 / 扫码 / CSV</button>
+  <button class="tab" data-tab="pending">② 待确认 <span class="badge" id="pendingBadge" hidden>0</span></button>
+  <button class="tab" data-tab="batches">③ 检测批次</button>
+  <button class="tab" data-tab="archive">④ 样本档案与流转</button>
+  <button class="tab" data-tab="dashboard">⑤ 总览</button>
+</nav>
+
+<main>
+  <!-- ================= 接收 ================= -->
+  <section class="panel active" id="tab-reception">
+    <div class="grid-2">
+      <div class="card">
+        <h2>条码扫描录入</h2>
+        <p class="hint">光标置于输入框，点击下方「模拟条码芯片」模拟扫码枪（自动带回车），也可直接输入虚构编号后回车。</p>
+        <div class="scan-row">
+          <input type="text" id="scanInput" placeholder="扫描或输入样本编号，如 S20261113-006" autocomplete="off">
+          <button class="btn btn-primary" id="scanGoBtn">录入</button>
+        </div>
+        <div class="chip-box" id="barcodeChips">
+          <p class="hint">模拟条码芯片（虚构条码）：</p>
+          <div class="chips" id="chipList"></div>
+        </div>
+        <div class="form-block">
+          <h3>手动补录样本信息</h3>
+          <div class="form-grid">
+            <label>样本编号<input type="text" id="fCode" placeholder="S20261113-006"></label>
+            <label>采集点
+              <select id="fSite"></select>
+            </label>
+            <label>采样时间<input type="datetime-local" id="fSampledAt"></label>
+            <label>检测项目（可多选）
+              <select id="fTests" multiple size="4"></select>
+            </label>
+          </div>
+          <div class="form-actions">
+            <button class="btn btn-primary" id="manualReceiveBtn">接收样本</button>
+            <span class="hint">按住 Ctrl / ⌘ 可多选检测项目</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>CSV 批量导入</h2>
+        <p class="hint">列格式：<code>sample_code,collection_site,sampled_at,tests</code>，项目用 <code>|</code> 分隔，时间支持 <code>2026-11-13 08:30</code> 或 ISO 格式。</p>
+        <div class="csv-toolbar">
+          <button class="btn" id="loadCsvDemoBtn">载入示例 CSV</button>
+          <label class="btn btn-ghost file-btn">选择 CSV 文件<input type="file" id="csvFile" accept=".csv,text/csv" hidden></label>
+        </div>
+        <textarea id="csvText" rows="10" spellcheck="false" placeholder="sample_code,collection_site,sampled_at,tests&#10;S20261113-010,发热门诊,2026-11-13 08:50,血常规|CRP"></textarea>
+        <div class="form-actions">
+          <button class="btn btn-primary" id="importCsvBtn">校验并导入</button>
+          <span id="csvPreview" class="hint"></span>
+        </div>
+        <div id="csvReport" class="import-report" hidden></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>今日接收记录 <span class="hint" id="receptionSummary"></span></h2>
+      <div class="table-wrap">
+        <table class="data-table" id="recentTable">
+          <thead><tr>
+            <th>样本编号</th><th>采集点</th><th>采样时间</th><th>检测项目</th><th>状态</th><th>批次</th><th>接收时间</th><th>操作</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 待确认 ================= -->
+  <section class="panel" id="tab-pending">
+    <div class="card">
+      <h2>信息冲突待确认队列</h2>
+      <p class="hint">同一编号再次到达、但采样时间或检测项目与原始记录不一致时进入此队列。<strong>原始记录始终保留且不可覆盖</strong>，由经手人核对后裁决。</p>
+      <div id="pendingList"></div>
+    </div>
+  </section>
+
+  <!-- ================= 批次 ================= -->
+  <section class="panel" id="tab-batches">
+    <div class="card" id="batchListView">
+      <div class="section-head">
+        <h2>检测批次</h2>
+        <div class="batch-create">
+          <select id="newBatchTest"></select>
+          <input type="text" id="newBatchName" placeholder="批次名称（可留空自动生成）">
+          <button class="btn btn-primary" id="createBatchBtn">新建批次</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table" id="batchTable">
+          <thead><tr>
+            <th>批次号</th><th>检测项目</th><th>状态</th><th>样本数</th><th>已出结果</th><th>修订</th><th>创建/关闭时间</th><th>操作</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card" id="batchDetailView" hidden>
+      <div class="section-head">
+        <h2 id="batchDetailTitle"></h2>
+        <button class="btn btn-ghost" id="backToBatchesBtn">← 返回批次列表</button>
+      </div>
+      <div id="batchSummaryBox" class="summary-box"></div>
+      <div id="revisionBanner" class="revision-banner" hidden></div>
+      <div class="table-wrap">
+        <table class="data-table" id="batchSampleTable">
+          <thead><tr>
+            <th>样本编号</th><th>采集点</th><th>采样时间</th><th>状态</th><th>结果（当前版本）</th><th>操作</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 档案 ================= -->
+  <section class="panel" id="tab-archive">
+    <div class="card">
+      <div class="section-head">
+        <h2>样本档案</h2>
+        <input type="search" id="archiveSearch" placeholder="按编号 / 采集点 / 项目搜索…">
+      </div>
+      <div class="table-wrap">
+        <table class="data-table" id="archiveTable">
+          <thead><tr>
+            <th>样本编号</th><th>采集点</th><th>采样时间</th><th>检测项目</th><th>状态</th><th>当前批次</th><th>来源/谱系</th><th>操作</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 总览 ================= -->
+  <section class="panel" id="tab-dashboard">
+    <div class="kpi-row" id="kpiRow"></div>
+    <div class="grid-2">
+      <div class="card">
+        <h2>按采集点统计</h2>
+        <div id="siteStats"></div>
+      </div>
+      <div class="card">
+        <h2>最近流转事件</h2>
+        <div id="recentEvents" class="event-feed"></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- 样本流转记录抽屉 -->
+<div class="drawer-mask" id="drawerMask" hidden></div>
+<aside class="drawer" id="sampleDrawer" hidden>
+  <div class="drawer-head">
+    <h2 id="drawerTitle"></h2>
+    <button class="btn btn-ghost" id="drawerCloseBtn">✕</button>
+  </div>
+  <div id="drawerBody" class="drawer-body"></div>
+</aside>
+
+<!-- 通用模态框 -->
+<div class="modal-mask" id="modalMask" hidden>
+  <div class="modal" id="modalBox">
+    <h3 id="modalTitle"></h3>
+    <div id="modalBody"></div>
+    <div class="modal-actions" id="modalActions"></div>
+  </div>
+</div>
+
+<div class="toast-wrap" id="toastWrap"></div>
+
+<script src="js/seed.js"></script>
+<script src="js/store.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+{
+  "name": "lab-sample-station",
+  "version": "1.0.0",
+  "private": true,
+  "description": "实验室样本接收台演示（虚构数据，纯前端，无后端无外部系统连接）",
+  "type": "module",
+  "scripts": {
+    "test": "node tests/smoke.mjs && node tests/dom-smoke.mjs",
+    "test:unit": "node tests/smoke.mjs",
+    "test:dom": "node tests/dom-smoke.mjs",
+    "serve": "node serve.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "^24.1.0"
+  }
+}
